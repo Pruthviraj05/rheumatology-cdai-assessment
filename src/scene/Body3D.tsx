@@ -173,8 +173,8 @@ function GroundShadow() {
     c.width = c.height = 128
     const g = c.getContext('2d')!
     const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64)
-    grad.addColorStop(0, 'rgba(20,30,45,0.38)')
-    grad.addColorStop(0.55, 'rgba(20,30,45,0.12)')
+    grad.addColorStop(0, 'rgba(20,24,32,0.22)')
+    grad.addColorStop(0.55, 'rgba(20,24,32,0.07)')
     grad.addColorStop(1, 'rgba(20,30,45,0)')
     g.fillStyle = grad
     g.fillRect(0, 0, 128, 128)
@@ -191,7 +191,7 @@ function GroundShadow() {
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]} raycast={() => null}>
         <ringGeometry args={[0.5, 0.515, 72]} />
-        <meshBasicMaterial color="#9fb0c2" transparent opacity={0.5} />
+        <meshBasicMaterial color="#9aa3ad" transparent opacity={0.22} />
       </mesh>
     </group>
   )
@@ -206,7 +206,8 @@ const SPHERE = new THREE.SphereGeometry(1, 14, 10)
 /** Outlines, halos and hit areas don't need the core's smoothness. */
 const SPHERE_LO = new THREE.SphereGeometry(1, 12, 8)
 const SMALL_IDS = new Set(JOINTS.filter((j) => ['mcp', 'pip', 'dip', 'mtp'].includes(j.group)).map((j) => j.id))
-const DECLUTTER_IDS = new Set(JOINTS.filter((j) => ['dip', 'mtp'].includes(j.group)).map((j) => j.id))
+/** Extra (non-scored) joints stay hidden in the overview until marked, selected or zoomed into. */
+const DECLUTTER_IDS = new Set(JOINTS.filter((j) => !j.cdai28).map((j) => j.id))
 
 function markerRadius(j: JointDef): number {
   switch (j.group) {

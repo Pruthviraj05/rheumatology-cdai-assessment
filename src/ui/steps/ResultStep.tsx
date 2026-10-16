@@ -60,11 +60,12 @@ export default function ResultStep({ data, result, record, history, currentConsu
   return (
     <div className="step-body">
       {complete ? (
-        <section className="result-card" style={{ borderColor: CATEGORY_COLOR[cat!] }} aria-live="polite">
+        <section className="result-card" aria-live="polite">
           <div className="result-number" style={{ color: CATEGORY_COLOR[cat!] }} data-testid="cdai-score">
             {formatScore(result.score!)}
           </div>
-          <div className="result-cat" style={{ background: CATEGORY_COLOR[cat!] }} data-testid="cdai-category">
+          <div className="result-cat" style={{ color: CATEGORY_COLOR[cat!] }} data-testid="cdai-category">
+            <span className="cat-dot" style={{ background: CATEGORY_COLOR[cat!] }} aria-hidden="true" />
             {categoryLabel(cat!)}
           </div>
           <p className="result-plain">{CATEGORY_PLAIN[cat!]}</p>

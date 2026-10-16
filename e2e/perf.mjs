@@ -12,12 +12,16 @@ await page.waitForTimeout(2500)
 
 console.log('render stats (idle):', await page.evaluate(() => window.__rheum.stats()))
 
-// Pick occlusion: from the front, the lumbar spine marker sits behind the body.
-const spine = await page.evaluate(() => window.__rheum.project('lumbar_spine'))
-await page.mouse.move(spine.x, spine.y); await page.mouse.down(); await page.mouse.up()
+// Pick occlusion: from behind, the knee marker (front of the leg) is hidden by the leg.
+await page.getByRole('button', { name: 'Back', exact: true }).click()
+await page.waitForTimeout(1500)
+const knee = await page.evaluate(() => window.__rheum.project('knee_l'))
+await page.mouse.move(knee.x, knee.y); await page.mouse.down(); await page.mouse.up()
 await page.waitForTimeout(300)
 const sel = await page.locator('[data-testid=selected-joint-name]').count()
-console.log('front-view click on hidden spine marker selects nothing:', sel === 0)
+console.log('back-view click on the hidden knee marker selects nothing:', sel === 0)
+await page.getByRole('button', { name: 'Front', exact: true }).click()
+await page.waitForTimeout(1500)
 
 // Frame pacing while orbiting.
 await page.evaluate(() => {

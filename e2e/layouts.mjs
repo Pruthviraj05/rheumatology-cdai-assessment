@@ -9,7 +9,7 @@ for (const [w, h, name] of [[1440, 900, 'desktop'], [820, 1180, 'tablet'], [390,
   await page.goto(BASE, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2500)
   await page.screenshot({ path: `${OUT}/${name}-1-start.png` })
-  await page.getByRole('button', { name: 'Start' }).click()
+  for (const n of ['Right wrist tender', 'Right wrist swollen', 'Left knee tender']) await page.getByRole('button', { name: n, exact: true }).click()
   await page.waitForTimeout(1600)
   await page.screenshot({ path: `${OUT}/${name}-2-joint.png` })
   await page.getByRole('button', { name: 'Load example' }).click()

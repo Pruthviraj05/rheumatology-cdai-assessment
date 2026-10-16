@@ -10,9 +10,10 @@ Click **Load example** to see 6 tender + 4 swollen + 5 patient + 3 doctor = **CD
 
 ## How it works — three simple steps
 
-1. **Joints** — press *Start* and answer two questions per joint: *Is it tender?* *Is it swollen?*
-   After both answers it moves to the next joint and the 3D camera follows. You can also tap any joint on the
-   body. "Everything else is normal" fills only the joints you haven't answered (undo available).
+1. **Joints** — tap only the joints that are **tender or swollen**, either on the 28-joint form (T / S buttons,
+   laid out like the paper form) or directly on the body. Then one button — *"Done — the other N joints are
+   normal"* — records every joint you didn't mark. A typical patient takes a handful of taps, not 56.
+   Pain, "can't be assessed" and notes are under *More* for the last joint you touched. Undo is always available.
 2. **Rating** — the patient's and the doctor's rating on a 0–10 slider ("Not rated yet" is never treated as 0).
    Counts can also be typed directly, like on MDCalc.
 3. **Result** — the CDAI appears only when everything is entered; otherwise it tells you exactly what's missing.
@@ -21,6 +22,8 @@ Click **Load example** to see 6 tender + 4 swollen + 5 patient + 3 doctor = **CD
 | Desktop — guided joint check | Phone |
 |---|---|
 | ![Joints](docs/screenshots/1-joints.png) | ![Phone](docs/screenshots/phone.png) |
+
+![X-ray view](docs/screenshots/2-rating-xray.png)
 
 ## The calculation
 
@@ -37,8 +40,10 @@ Remission ≤ 2.8 · Low > 2.8–10 · Moderate > 10–22 · High > 22.
 
 * Stylised anatomical model built procedurally: lofted torso, shaped head, muscle-shaped limbs, detailed hands
   (knuckles, three phalanges per finger, nails, thenar eminence) and feet (heel, arch, toes, ankle bones).
-* **X-ray** toggle shows a skeleton (skull, curved spine, rib cage, pelvis, long bones, carpals/metacarpals,
-  phalanges, patellae, metatarsals) aligned with the joint markers.
+* **X-ray** toggle gives a radiograph-style view on a dark background: glowing soft-tissue outline and a skeleton —
+  skull with orbits, teeth and mandible, S-curved spine (24 vertebrae with discs and processes), 12 curved rib
+  pairs with costal cartilage and sternum, clavicles, scapulae, pelvis, long bones with epiphyses, carpals,
+  metacarpals, phalanges, patellae, tarsals and metatarsals — aligned with the joint markers.
 * Optimised: render-on-demand, the whole body is one draw call, all 54 markers are 4 instanced draw calls
   (**6 draw calls total**, ~59k triangles), size-based level of detail, adaptive resolution while orbiting.
 * A **Joint chart** (2D) offers the identical workflow and is used automatically when WebGL isn't available.

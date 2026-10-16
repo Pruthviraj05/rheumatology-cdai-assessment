@@ -1,240 +1,240 @@
-import type { AssessmentResult, JointFinding } from '../../domain/assessment'
-import type { JointDef } from '../../domain/joints'
+/**
+ * Step 1 — quick joint examination.
+ *
+ * Doctors mark ONLY the affected joints (tap on the body or on the 28-joint form), then press one
+ * button to record every other joint as normal. A typical patient takes a handful of taps.
+ */
+import type { AssessmentData, AssessmentResult, JointFinding } from '../../domain/assessment'
+import { EMPTY_FINDING } from '../../domain/assessment'
+import { DIGIT_NAMES, JOINT_BY_ID, type JointDef } from '../../domain/joints'
+
+export type Tool = 'tender' | 'swollen' | 'pain' | 'erase'
 
 interface Props {
-  joint: JointDef | null
-  finding: JointFinding
-  editable: boolean
+  data: AssessmentData
   result: AssessmentResult
-  /** 1-based position inside the 28-joint set, or null for pain-map joints. */
-  position: number | null
+  editable: boolean
+  tool: Tool
+  onTool(t: Tool): void
+  /** Toggle tender / swollen on one joint (used by the form). */
+  onToggle(jointId: string, field: 'tenderness' | 'swelling'): void
+  selected: JointDef | null
+  selectedFinding: JointFinding
+  onDetail(patch: Partial<JointFinding>): void
   canUndo: boolean
   onUndo(): void
-  onAnswer(patch: Partial<JointFinding>): void
-  onPrev(): void
-  onNext(): void
-  onStart(): void
-  onRemainingNormal(): void
-  onGoRating(): void
 }
 
-function YesNo({
-  label,
-  hint,
-  yesLabel,
-  value,
-  yesValue,
-  noValue,
-  tone,
-  disabled,
-  onPick,
+const TOOLS: { id: Tool; label: string }[] = [
+  { id: 'tender', label: 'Tender' },
+  { id: 'swollen', label: 'Swollen' },
+  { id: 'pain', label: 'Pain' },
+  { id: 'erase', label: 'Erase' },
+]
+
+/** Rows of the classic 28-joint form; each cell lists the joint groups on that row. */
+const ROWS: { label: string; cells: { prefix: string; short: string }[] }[] = [
+  { label: 'Shoulder', cells: [{ prefix: 'shoulder', short: '' }] },
+  { label: 'Elbow', cells: [{ prefix: 'elbow', short: '' }] },
+  { label: 'Wrist', cells: [{ prefix: 'wrist', short: '' }] },
+  ...([1, 2, 3, 4, 5] as const).map((d) => ({
+    label: DIGIT_NAMES[d][0].toUpperCase() + DIGIT_NAMES[d].slice(1),
+    cells: [
+      { prefix: `mcp${d}`, short: 'MCP' },
+      { prefix: `pip${d}`, short: d === 1 ? 'IP' : 'PIP' },
+    ],
+  })),
+  { label: 'Knee', cells: [{ prefix: 'knee', short: '' }] },
+]
+
+function Cell({
+  id,
+  short,
+  data,
+  editable,
+  onToggle,
 }: {
-  label: string
-  hint: string
-  yesLabel: string
-  value: string
-  yesValue: string
-  noValue: string
-  tone: 'tender' | 'swollen'
-  disabled: boolean
-  onPick(v: string): void
+  id: string
+  short: string
+  data: AssessmentData
+  editable: boolean
+  onToggle: Props['onToggle']
 }) {
+  const f = data.joints[id] ?? EMPTY_FINDING
+  const name = JOINT_BY_ID[id].name
+  const checked = f.notAssessable || (f.tenderness !== 'unknown' && f.swelling !== 'unknown')
   return (
-    <div className="question">
-      <div className="q-text">
-        <strong>{label}</strong>
-        <span>{hint}</span>
-      </div>
-      <div className="yesno" role="group" aria-label={label}>
-        <button type="button" disabled={disabled} aria-pressed={value === yesValue} data-tone={tone} onClick={() => onPick(value === yesValue ? 'unknown' : yesValue)}>
-          {yesLabel}
-        </button>
-        <button type="button" disabled={disabled} aria-pressed={value === noValue} data-tone="no" onClick={() => onPick(value === noValue ? 'unknown' : noValue)}>
-          No
-        </button>
-      </div>
+    <div className="cell" data-checked={checked} title={short ? `${name}` : undefined}>
+      <button
+        type="button"
+        className="ts t"
+        aria-pressed={f.tenderness === 'tender'}
+        aria-label={`${name} tender`}
+        disabled={!editable || f.notAssessable}
+        onClick={() => onToggle(id, 'tenderness')}
+      >
+        T
+      </button>
+      <button
+        type="button"
+        className="ts s"
+        aria-pressed={f.swelling === 'swollen'}
+        aria-label={`${name} swollen`}
+        disabled={!editable || f.notAssessable}
+        onClick={() => onToggle(id, 'swelling')}
+      >
+        S
+      </button>
     </div>
   )
 }
 
 export default function ExamStep({
-  joint,
-  finding,
-  editable,
+  data,
   result,
-  position,
+  editable,
+  tool,
+  onTool,
+  onToggle,
+  selected,
+  selectedFinding,
+  onDetail,
   canUndo,
   onUndo,
-  onAnswer,
-  onPrev,
-  onNext,
-  onStart,
-  onRemainingNormal,
-  onGoRating,
 }: Props) {
   const c = result.counts.cdai
-  const allDone = c.unresolvedIds.length === 0
-  const pct = Math.round((c.resolved / c.total) * 100)
   const manual = result.countSource === 'manual'
 
   return (
     <div className="step-body">
-      <div className="progress" aria-label="Examination progress">
-        <div className="progress-text">
-          <strong data-testid="progress-count">
-            {c.resolved} of {c.total}
-          </strong>{' '}
-          joints checked
-          {canUndo && (
-            <button type="button" className="link undo" onClick={onUndo}>
-              ↶ Undo
-            </button>
-          )}
-        </div>
-        <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.resolved} aria-label="Joints checked">
-          <span style={{ width: `${pct}%` }} />
-        </div>
+      <div>
+        <h2 className="step-title">Tap the affected joints</h2>
+        <p className="step-help">Only mark joints that are tender or swollen. Leave normal joints alone — one tap at the end records them.</p>
       </div>
 
-      {manual && (
-        <p className="note-box">
-          You chose to type the joint counts yourself (step 2). The joint check below is optional documentation.
-        </p>
-      )}
+      {manual && <p className="note-box">You chose to type the counts yourself (step 2). Marking joints here is optional.</p>}
 
-      {!joint ? (
-        <div className="start-card">
-          {allDone ? (
-            <>
-              <h2>All 28 joints checked ✓</h2>
-              <p>
-                {c.tender} tender · {c.swollen} swollen. You can still tap any joint on the body to change an answer.
-              </p>
-              <button type="button" className="btn big primary" onClick={onGoRating}>
-                Continue to overall rating →
-              </button>
-            </>
-          ) : (
-            <>
-              <h2>{c.resolved === 0 ? "Let's check the joints" : 'Continue the joint check'}</h2>
-              <p>
-                We go through the 28 joints one at a time. For each one, answer two quick questions: <b>tender?</b> and{' '}
-                <b>swollen?</b> You can also tap a joint on the body.
-              </p>
-              <button type="button" className="btn big primary" onClick={onStart} disabled={!editable}>
-                {c.resolved === 0 ? 'Start' : 'Continue'}
-              </button>
-            </>
-          )}
+      <div className="tally" aria-live="polite">
+        <span className="tally-item t">
+          <b data-testid="count-tender">{c.tender}</b> tender
+        </span>
+        <span className="tally-item s">
+          <b data-testid="count-swollen">{c.swollen}</b> swollen
+        </span>
+        <span className="tally-item">
+          <b data-testid="progress-count">
+            {c.resolved}/{c.total}
+          </b>{' '}
+          recorded
+        </span>
+        {canUndo && (
+          <button type="button" className="link undo" onClick={onUndo}>
+            ↶ Undo
+          </button>
+        )}
+      </div>
+
+      <section aria-label="Tapping a joint on the body marks it as">
+        <p className="tool-label">Tapping the body marks:</p>
+        <div className="tools" role="group" aria-label="Tapping the body marks">
+          {TOOLS.map((t) => (
+            <button key={t.id} type="button" data-tool={t.id} aria-pressed={tool === t.id} disabled={!editable} onClick={() => onTool(t.id)}>
+              <span className="tool-dot" aria-hidden="true" />
+              {t.label}
+            </button>
+          ))}
         </div>
-      ) : (
-        <div className="joint-card" data-joint={joint.id}>
-          <div className="joint-title">
-            <h2 data-testid="selected-joint-name">{joint.name}</h2>
-            <span className="joint-sub">
-              {position ? `Joint ${position} of 28` : 'Extra joint — not counted in the score'}
-            </span>
-          </div>
+      </section>
 
-          <YesNo
-            label="Is it tender?"
-            hint="Painful when pressed"
-            yesLabel="Yes, tender"
-            value={finding.tenderness}
-            yesValue="tender"
-            noValue="not_tender"
-            tone="tender"
-            disabled={!editable || finding.notAssessable}
-            onPick={(v) => onAnswer({ tenderness: v as JointFinding['tenderness'] })}
-          />
-          <YesNo
-            label="Is it swollen?"
-            hint="Puffy, visible or felt"
-            yesLabel="Yes, swollen"
-            value={finding.swelling}
-            yesValue="swollen"
-            noValue="not_swollen"
-            tone="swollen"
-            disabled={!editable || finding.notAssessable}
-            onPick={(v) => onAnswer({ swelling: v as JointFinding['swelling'] })}
-          />
-
-          <details className="more">
-            <summary>More options</summary>
-            <div className="more-body">
-              <div className="question compact">
-                <div className="q-text">
-                  <strong>Does the patient report pain here?</strong>
+      <section className="form28" aria-label="28-joint form">
+        <div className="form-head">
+          <span>Right</span>
+          <span />
+          <span>Left</span>
+        </div>
+        {ROWS.map((row, i) => (
+          <div key={row.label} className="form-group">
+            {i === 3 && (
+              <div className="form-row sub" aria-hidden="true">
+                <div className="side">
+                  <span>MCP</span>
+                  <span>PIP</span>
                 </div>
-                <div className="yesno small" role="group" aria-label="Pain reported by patient">
-                  {(['yes', 'no'] as const).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      disabled={!editable}
-                      aria-pressed={finding.pain === v}
-                      data-tone={v === 'yes' ? 'pain' : 'no'}
-                      onClick={() => onAnswer({ pain: finding.pain === v ? 'unknown' : v })}
-                    >
-                      {v === 'yes' ? 'Yes' : 'No'}
-                    </button>
-                  ))}
+                <span className="row-label">Hand</span>
+                <div className="side">
+                  <span>MCP</span>
+                  <span>PIP</span>
                 </div>
               </div>
-              {finding.pain === 'yes' && (
-                <label className="range-line">
-                  <span>Pain level (0–10, not part of the score)</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    disabled={!editable}
-                    value={finding.painIntensity ?? 0}
-                    onChange={(e) => onAnswer({ painIntensity: Number(e.target.value) })}
-                    aria-label="Pain level"
-                  />
-                  <output>{finding.painIntensity ?? '—'}</output>
-                </label>
-              )}
-              <label className="check">
-                <input
-                  type="checkbox"
-                  disabled={!editable}
-                  checked={finding.notAssessable}
-                  onChange={(e) => onAnswer({ notAssessable: e.target.checked })}
-                />
-                <span>Can't be assessed (replaced, fused or missing joint)</span>
-              </label>
-              <label className="field">
-                <span>Note</span>
-                <textarea
-                  rows={2}
-                  disabled={!editable}
-                  value={finding.note}
-                  maxLength={500}
-                  placeholder="Optional"
-                  onChange={(e) => onAnswer({ note: e.target.value })}
-                />
-              </label>
+            )}
+          <div className="form-row">
+            <div className="side">
+              {row.cells.map((cell) => (
+                <Cell key={cell.prefix} id={`${cell.prefix}_r`} short={cell.short} data={data} editable={editable} onToggle={onToggle} />
+              ))}
             </div>
-          </details>
-
-          <div className="nav-row">
-            <button type="button" className="btn" onClick={onPrev}>
-              ← Previous
-            </button>
-            <button type="button" className="btn primary" onClick={onNext}>
-              {allDone ? 'Next joint →' : 'Next joint →'}
-            </button>
+            <span className="row-label">{row.label}</span>
+            <div className="side">
+              {row.cells.map((cell) => (
+                <Cell key={cell.prefix} id={`${cell.prefix}_l`} short={cell.short} data={data} editable={editable} onToggle={onToggle} />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+          </div>
+        ))}
+        <p className="form-foot muted">T = tender · S = swollen. Feet, ankles, hips and spine can be marked on the body; they don't change the score.</p>
+      </section>
 
-      {!allDone && c.resolved > 0 && editable && (
-        <button type="button" className="link shortcut" onClick={onRemainingNormal}>
-          Everything else is normal — fill in the remaining {c.unresolvedIds.length} joints
-        </button>
+      {selected && (
+        <details className="more">
+          <summary>
+            More for <b data-testid="selected-joint-name">{selected.name}</b>
+            {!selected.cdai28 && <span className="muted"> — not counted in the score</span>}
+          </summary>
+          <div className="more-body">
+            <div className="question compact">
+              <strong>Patient reports pain here?</strong>
+              <div className="yesno small" role="group" aria-label="Pain reported by patient">
+                {(['yes', 'no'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    disabled={!editable}
+                    aria-pressed={selectedFinding.pain === v}
+                    data-tone={v === 'yes' ? 'pain' : 'no'}
+                    onClick={() => onDetail({ pain: selectedFinding.pain === v ? 'unknown' : v })}
+                  >
+                    {v === 'yes' ? 'Yes' : 'No'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {selectedFinding.pain === 'yes' && (
+              <label className="range-line">
+                <span>Pain level (0–10, not part of the score)</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={10}
+                  step={1}
+                  disabled={!editable}
+                  value={selectedFinding.painIntensity ?? 0}
+                  onChange={(e) => onDetail({ painIntensity: Number(e.target.value) })}
+                  aria-label="Pain level"
+                />
+                <output>{selectedFinding.painIntensity ?? '—'}</output>
+              </label>
+            )}
+            <label className="check">
+              <input type="checkbox" disabled={!editable} checked={selectedFinding.notAssessable} onChange={(e) => onDetail({ notAssessable: e.target.checked })} />
+              <span>Can't be assessed (replaced, fused or missing joint)</span>
+            </label>
+            <label className="field">
+              <span>Note</span>
+              <textarea rows={2} disabled={!editable} value={selectedFinding.note} maxLength={500} placeholder="Optional" onChange={(e) => onDetail({ note: e.target.value })} />
+            </label>
+          </div>
+        </details>
       )}
     </div>
   )

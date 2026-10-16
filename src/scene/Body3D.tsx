@@ -110,14 +110,44 @@ const Anatomy = memo(function Anatomy({ showBones }: { showBones: boolean }) {
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0 }),
     [],
   )
-  const bone = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72 }), [])
-
-  useLayoutEffect(() => {
-    skin.transparent = showBones
-    skin.opacity = showBones ? 0.16 : 1
-    skin.depthWrite = !showBones
-    skin.needsUpdate = true
-  }, [showBones, skin])
+  const bone = useMemo(
+    () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, emissive: new THREE.Color('#5d6b78'), emissiveIntensity: 0.55 }),
+    [],
+  )
+  // Radiograph-style soft tissue: a faint fresnel glow, brightest at the body's silhouette.
+  const xraySkin = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color('#7fb4ff') }, uStrength: { value: 0.75 } },
+        vertexShader: `
+          varying vec3 vN; varying vec3 vV;
+          void main() {
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vN = normalize(normalMatrix * normal);
+            vV = normalize(-mv.xyz);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform vec3 uColor; uniform float uStrength;
+          varying vec3 vN; varying vec3 vV;
+          void main() {
+            float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
+            gl_FragColor = vec4(uColor * (0.05 + rim * uStrength), 1.0);
+          }`,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    [],
+  )
+  useEffect(
+    () => () => {
+      skin.dispose()
+      bone.dispose()
+      xraySkin.dispose()
+    },
+    [skin, bone, xraySkin],
+  )
 
   const stop = (e: ThreeEvent<PointerEvent | MouseEvent>) => e.stopPropagation()
 
@@ -126,7 +156,7 @@ const Anatomy = memo(function Anatomy({ showBones }: { showBones: boolean }) {
       {/* Opaque skin occludes picking of markers on the far side; in X-ray it does not. */}
       <mesh
         geometry={geo.skin}
-        material={skin}
+        material={showBones ? xraySkin : skin}
         renderOrder={showBones ? 2 : 0}
         onClick={showBones ? undefined : stop}
         onPointerOver={showBones ? undefined : stop}

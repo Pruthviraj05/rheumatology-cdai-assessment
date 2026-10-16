@@ -3,18 +3,18 @@
  * consultation. It receives references to the existing patient / consultation / clinician and a
  * persistence adapter; it creates none of those itself.
  *
- * UX: a simple three-step flow —  1 Check joints  →  2 Rate overall  →  3 Result.
- * The body (3D or chart) is always visible on the left; the right side shows ONE step at a time.
+ * UX: three simple steps — 1 Joints → 2 Rating → 3 Result.
+ * Step 1 only asks the doctor to tap the AFFECTED joints; one button records the rest as normal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EMPTY_FINDING, type JointFinding } from '../domain/assessment'
 import type { ConsultationContext } from '../domain/context'
 import { categoryLabel, formatScore } from '../domain/cdai'
-import { CDAI28_JOINTS, JOINT_BY_ID } from '../domain/joints'
+import { JOINT_BY_ID } from '../domain/joints'
 import type { AssessmentRepository } from '../persistence/repository'
 import BodyStage, { type StageMode } from './BodyStage'
 import { Banner, Modal } from './controls'
-import ExamStep from './steps/ExamStep'
+import ExamStep, { type Tool } from './steps/ExamStep'
 import RatingStep from './steps/RatingStep'
 import ResultStep from './steps/ResultStep'
 import { CATEGORY_COLOR } from './theme'
@@ -29,9 +29,8 @@ export interface ModuleProps {
 }
 
 type Step = 'exam' | 'rating' | 'result'
-type Dialog = null | 'finalize' | 'amend' | 'remaining'
+type Dialog = null | 'finalize' | 'amend'
 
-const CDAI_IDS = CDAI28_JOINTS.map((j) => j.id)
 const STEPS: { id: Step; label: string }[] = [
   { id: 'exam', label: 'Joints' },
   { id: 'rating', label: 'Rating' },
@@ -43,148 +42,91 @@ const longDate = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-const isTyping = (t: EventTarget | null) => {
-  const el = t as HTMLElement | null
-  return !!el?.tagName && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable)
-}
-
 export default function RheumatologyAssessmentModule({ context, repository, onReturnToConsultation, initialStageMode }: ModuleProps) {
   const session = useAssessmentSession(context, repository)
   const { data, result, editable } = session
 
   const [step, setStep] = useState<Step>('exam')
+  const [tool, setTool] = useState<Tool>('tender')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [guided, setGuided] = useState(false)
-  const [focus, setFocus] = useState<{ jointId: string; nonce: number } | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [reason, setReason] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
-  const advanceTimer = useRef<number | undefined>(undefined)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const dataRef = useRef(data)
+  dataRef.current = data
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(null), 3000)
+    toastTimer.current = window.setTimeout(() => setToast(null), 3200)
   }, [])
-  useEffect(
-    () => () => {
-      window.clearTimeout(toastTimer.current)
-      window.clearTimeout(advanceTimer.current)
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [step])
+
+  /** Toggle a finding. Turning one off keeps the joint "examined" if the other finding was recorded. */
+  const toggle = useCallback(
+    (id: string, field: 'tenderness' | 'swelling' | 'pain') => {
+      const f = dataRef.current.joints[id] ?? EMPTY_FINDING
+      if (field === 'tenderness') {
+        session.setJoint(id, { tenderness: f.tenderness === 'tender' ? (f.swelling !== 'unknown' ? 'not_tender' : 'unknown') : 'tender' })
+      } else if (field === 'swelling') {
+        session.setJoint(id, { swelling: f.swelling === 'swollen' ? (f.tenderness !== 'unknown' ? 'not_swollen' : 'unknown') : 'swollen' })
+      } else {
+        session.setJoint(id, { pain: f.pain === 'yes' ? 'unknown' : 'yes' })
+      }
     },
-    [],
+    [session],
   )
 
-  // Latest values for timers / event handlers.
-  const dataRef = useRef(data)
-  dataRef.current = data
-  const selectedRef = useRef(selectedId)
-  selectedRef.current = selectedId
+  const toggleFromForm = useCallback(
+    (id: string, field: 'tenderness' | 'swelling') => {
+      setSelectedId(id)
+      toggle(id, field)
+    },
+    [toggle],
+  )
 
-  const unresolved = (id: string) => {
-    const f = dataRef.current.joints[id] ?? EMPTY_FINDING
-    return !f.notAssessable && (f.tenderness === 'unknown' || f.swelling === 'unknown')
+  /** A tap on the body applies the current marker tool. */
+  const tapBody = useCallback(
+    (id: string) => {
+      setSelectedId(id)
+      setStep('exam')
+      if (!editable) return
+      if (tool === 'tender') toggle(id, 'tenderness')
+      else if (tool === 'swollen') toggle(id, 'swelling')
+      else if (tool === 'pain') toggle(id, 'pain')
+      else session.setJoint(id, { tenderness: 'unknown', swelling: 'unknown', pain: 'unknown', notAssessable: false })
+    },
+    [editable, tool, toggle, session],
+  )
+
+  const finishJoints = () => {
+    const missing = result.counts.cdai.unresolvedIds
+    if (missing.length > 0 && editable) {
+      session.fillMissingNormal(missing)
+      showToast(`The other ${missing.length} joints were recorded as normal. Undo is on the Joints step.`)
+    }
+    setStep('rating')
   }
 
-  const open = useCallback((id: string, opts: { guided: boolean; follow: boolean }) => {
-    window.clearTimeout(advanceTimer.current)
-    setSelectedId(id)
-    setGuided(opts.guided)
-    setStep('exam')
-    if (opts.follow) setFocus((f) => ({ jointId: id, nonce: (f?.nonce ?? 0) + 1 }))
-  }, [])
-
-  /** Next joint of the 28-joint set that still needs an answer (cyclic), skipping `treatAsDone`. */
-  const nextUnresolved = useCallback((from: string | null, treatAsDone?: string) => {
-    const start = from ? CDAI_IDS.indexOf(from) : -1
-    for (let i = 1; i <= CDAI_IDS.length; i++) {
-      const id = CDAI_IDS[(start + i + CDAI_IDS.length) % CDAI_IDS.length]
-      if (id === treatAsDone) continue
-      if (unresolved(id)) return id
-    }
-    return null
-  }, [])
-
-  const goNext = useCallback(
-    (treatAsDone?: string) => {
-      const cur = selectedRef.current
-      const next = nextUnresolved(cur, treatAsDone)
-      if (next) {
-        open(next, { guided: true, follow: true })
-        return
-      }
-      // Everything answered: either review the next joint in order, or show the "all done" card.
-      if (treatAsDone || !cur) {
-        window.clearTimeout(advanceTimer.current)
-        setSelectedId(null)
-        setGuided(false)
-        showToast('All 28 joints are checked.')
-      } else {
-        const idx = CDAI_IDS.indexOf(cur)
-        open(CDAI_IDS[(idx + 1) % CDAI_IDS.length], { guided: true, follow: true })
-      }
-    },
-    [nextUnresolved, open, showToast],
-  )
-
-  const goPrev = useCallback(() => {
-    const cur = selectedRef.current
-    const idx = cur ? Math.max(CDAI_IDS.indexOf(cur), 0) : 0
-    open(CDAI_IDS[(idx - 1 + CDAI_IDS.length) % CDAI_IDS.length], { guided: true, follow: true })
-  }, [open])
-
-  const start = useCallback(() => {
-    open(nextUnresolved(null) ?? CDAI_IDS[0], { guided: true, follow: true })
-  }, [open, nextUnresolved])
-
-  const answer = useCallback(
-    (patch: Partial<JointFinding>) => {
-      const id = selectedRef.current
-      if (!id) return
-      session.setJoint(id, patch)
-      // Guided flow: once both questions are answered, move on automatically.
-      const merged = { ...(dataRef.current.joints[id] ?? EMPTY_FINDING), ...patch }
-      const answered = 'tenderness' in patch || 'swelling' in patch
-      if (guided && answered && merged.tenderness !== 'unknown' && merged.swelling !== 'unknown') {
-        window.clearTimeout(advanceTimer.current)
-        advanceTimer.current = window.setTimeout(() => goNext(id), 380)
-      }
-    },
-    [session, guided, goNext],
-  )
-
-  // Keyboard shortcuts (power users): arrows, T, S, N, Ctrl+Z. Not shown in the UI to keep it simple.
+  // Ctrl+Z undo
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (dialog || e.altKey || isTyping(e.target) || step !== 'exam') return
-      const k = e.key.toLowerCase()
-      if ((e.ctrlKey || e.metaKey) && k === 'z') {
+      const el = e.target as HTMLElement | null
+      if (dialog || (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         session.undo()
-        return
-      }
-      if (e.ctrlKey || e.metaKey) return
-      const id = selectedRef.current
-      if (k === 'arrowright' || k === 'arrowdown') {
-        e.preventDefault()
-        goNext()
-      } else if (k === 'arrowleft' || k === 'arrowup') {
-        e.preventDefault()
-        goPrev()
-      } else if (id && editable) {
-        const f = dataRef.current.joints[id] ?? EMPTY_FINDING
-        if (k === 't') answer({ tenderness: f.tenderness === 'tender' ? 'not_tender' : 'tender' })
-        else if (k === 's') answer({ swelling: f.swelling === 'swollen' ? 'not_swollen' : 'swollen' })
-        else if (k === 'n') {
-          session.markJointsNormal([id])
-          goNext(id)
-        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dialog, step, editable, session, goNext, goPrev, answer])
+  }, [dialog, session])
 
   useEffect(() => {
     if (!session.dirty) return
@@ -196,15 +138,9 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
     return () => window.removeEventListener('beforeunload', h)
   }, [session.dirty])
 
-  // Each new joint / step starts at the top of the panel (important on phones).
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0
-  }, [selectedId, step])
-
   // ---- derived -------------------------------------------------------------------------
-  const joint = selectedId ? JOINT_BY_ID[selectedId] : null
-  const finding = selectedId ? (data.joints[selectedId] ?? EMPTY_FINDING) : EMPTY_FINDING
-  const position = selectedId && CDAI_IDS.includes(selectedId) ? CDAI_IDS.indexOf(selectedId) + 1 : null
+  const selected = selectedId ? JOINT_BY_ID[selectedId] : null
+  const selectedFinding: JointFinding = selectedId ? (data.joints[selectedId] ?? EMPTY_FINDING) : EMPTY_FINDING
   const c = result.counts.cdai
   const complete = result.status === 'complete'
   const finalized = session.record?.status === 'finalized'
@@ -213,7 +149,7 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
     if (session.loading) return { label: 'Loading…', tone: 'neutral' }
     if (finalized) return { label: session.amending ? 'Amending' : 'Finalized', tone: 'final' }
     if (complete) return { label: 'Ready to finalize', tone: 'ready' }
-    const started = result.counts.all.examined + result.counts.all.partial > 0 || result.ptga !== null || result.prga !== null
+    const started = result.counts.all.examined + result.counts.all.partial > 0 || result.counts.painReported > 0 || result.ptga !== null || result.prga !== null
     return started || session.record ? { label: 'In progress', tone: 'draft' } : { label: 'Not started', tone: 'neutral' }
   }, [session.loading, finalized, session.amending, complete, result, session.record])
 
@@ -231,7 +167,6 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
       showToast(session.amending ? 'Amendment saved.' : 'Assessment finalized.')
     }
   }
-
   const saveDraft = async () => {
     if (await session.saveDraft()) showToast('Draft saved.')
   }
@@ -241,9 +176,10 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
   else if (session.dirty) saveText = 'Unsaved changes'
   else if (session.record) saveText = finalized ? 'Saved · finalized' : 'Saved'
 
+  const missing = c.unresolvedIds.length
+
   return (
     <div className="module">
-      {/* header */}
       <header className="module-header">
         <div className="title-block">
           <h1>Joint assessment</h1>
@@ -314,18 +250,10 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
       )}
 
       <div className="workspace">
-        {/* body */}
         <section className="panel body-panel" aria-label="Body">
-          <BodyStage
-            data={data}
-            selectedId={selectedId}
-            onSelect={(id) => open(id, { guided: false, follow: false })}
-            initialMode={initialStageMode}
-            focusRequest={focus}
-          />
+          <BodyStage data={data} selectedId={selectedId} onSelect={tapBody} initialMode={initialStageMode} focusRequest={null} />
         </section>
 
-        {/* steps */}
         <section className="panel step-panel" aria-label="Assessment steps">
           <nav className="stepper" aria-label="Steps">
             {STEPS.map((s, i) => (
@@ -339,19 +267,17 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
           <div className="step-scroll" ref={scrollRef}>
             {step === 'exam' && (
               <ExamStep
-                joint={joint}
-                finding={finding}
-                editable={editable}
+                data={data}
                 result={result}
-                position={position}
+                editable={editable}
+                tool={tool}
+                onTool={setTool}
+                onToggle={toggleFromForm}
+                selected={selected}
+                selectedFinding={selectedFinding}
+                onDetail={(patch) => selectedId && session.setJoint(selectedId, patch)}
                 canUndo={session.canUndo}
                 onUndo={session.undo}
-                onAnswer={answer}
-                onPrev={goPrev}
-                onNext={() => goNext()}
-                onStart={start}
-                onRemainingNormal={() => setDialog('remaining')}
-                onGoRating={() => setStep('rating')}
               />
             )}
             {step === 'rating' && (
@@ -379,11 +305,16 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
           </div>
 
           <footer className="step-footer">
-            {step === 'exam' && (
-              <button type="button" className="btn primary grow" onClick={() => setStep('rating')} data-testid="to-rating">
-                Next: overall rating →
-              </button>
-            )}
+            {step === 'exam' &&
+              (missing > 0 && editable && result.countSource === 'joint-exam' ? (
+                <button type="button" className="btn primary grow" onClick={finishJoints} data-testid="joints-done">
+                  ✓ Done — the other {missing} joint{missing === 1 ? ' is' : 's are'} normal
+                </button>
+              ) : (
+                <button type="button" className="btn primary grow" onClick={() => setStep('rating')} data-testid="to-rating">
+                  Next: overall rating →
+                </button>
+              ))}
             {step === 'rating' && (
               <>
                 <button type="button" className="btn" onClick={() => setStep('exam')}>
@@ -431,7 +362,7 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
         </div>
       )}
 
-      {(dialog === 'finalize' || dialog === 'amend') && (
+      {dialog && (
         <Modal
           title={dialog === 'amend' ? 'Save amendment' : 'Finalize this assessment?'}
           onClose={() => setDialog(null)}
@@ -473,38 +404,6 @@ export default function RheumatologyAssessmentModule({ context, repository, onRe
               {session.error.message}
             </p>
           )}
-        </Modal>
-      )}
-
-      {dialog === 'remaining' && (
-        <Modal
-          title="Fill in the remaining joints?"
-          onClose={() => setDialog(null)}
-          footer={
-            <>
-              <button type="button" className="btn" data-close onClick={() => setDialog(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  session.fillMissingNormal(c.unresolvedIds)
-                  setDialog(null)
-                  setSelectedId(null)
-                  showToast(`${c.unresolvedIds.length} joints marked "not tender, not swollen". You can undo this.`)
-                }}
-              >
-                Yes, mark them normal
-              </button>
-            </>
-          }
-        >
-          <p>
-            {c.unresolvedIds.length} joint{c.unresolvedIds.length === 1 ? '' : 's'} will be recorded as <b>not tender</b> and{' '}
-            <b>not swollen</b>. Answers you already gave are never changed.
-          </p>
-          <p className="muted">Only do this for joints you actually examined.</p>
         </Modal>
       )}
     </div>

@@ -58,6 +58,9 @@ Driven live on 2026-10-16:
 
 ## UX notes
 
-* The interface is a 3-step guided flow (Joints → Rating → Result). In the guided joint check the module moves
-  to the next joint automatically after both questions are answered; tapping a joint directly never auto-advances.
-* Keyboard shortcuts remain for power users but are not shown: `T`, `S`, `N` (normal & next), arrows, `Ctrl+Z`.
+* Step 1 asks the clinician to mark only abnormal joints (28-joint T/S form or taps on the body), then a single
+  explicit button — "Done — the other N joints are normal" — records the unmarked joints as not tender / not
+  swollen (`fillMissingAsNormal`, never overwrites a recorded finding, undoable). Until that button is pressed,
+  unmarked joints remain "not examined" and no CDAI is produced. Confirm this matches the clinic's documentation
+  policy (it is equivalent to ticking only abnormal joints on the paper 28-joint form).
+* Turning a finding off after "Done" keeps the joint examined (negative), not "unknown".

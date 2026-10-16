@@ -42,6 +42,9 @@ export const BONE_COLORS = {
   base: new THREE.Color('#ece4cf'),
   joint: new THREE.Color('#d9ccad'),
   cartilage: new THREE.Color('#c9d8dc'),
+  tooth: new THREE.Color('#f7f3e8'),
+  /** Openings (orbits, nasal aperture) — read as dark holes on the X-ray. */
+  dark: new THREE.Color('#2b3542'),
 }
 
 export class GeometryBuilder {
@@ -106,6 +109,12 @@ export class GeometryBuilder {
       this.ellipsoid(a, [ra, ra, ra], color, seg)
       this.ellipsoid(b, [rb, rb, rb], color, seg)
     }
+  }
+
+  /** Smooth curved bone (rib, clavicle, mandible…) through the given points. */
+  tube(points: V3[], radius: number, color: THREE.Color, tubular = 16, radial = 6) {
+    const curve = new THREE.CatmullRomCurve3(points.map((q) => new THREE.Vector3(q[0], q[1], q[2])))
+    this.push(new THREE.TubeGeometry(curve, tubular, radius, radial, false), color)
   }
 
   /** Lofted closed surface through horizontal elliptical rings, listed from top to bottom. */
@@ -300,108 +309,183 @@ function buildSkin(detail: number): THREE.BufferGeometry {
 // Skeleton
 // ---------------------------------------------------------------------------------------
 
+/** Spine centre-line: cervical lordosis, thoracic kyphosis, lumbar lordosis. */
+const SPINE_CURVE = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(0, 1.62, -0.018),
+  new THREE.Vector3(0, 1.54, -0.026),
+  new THREE.Vector3(0, 1.46, -0.045),
+  new THREE.Vector3(0, 1.34, -0.062),
+  new THREE.Vector3(0, 1.22, -0.06),
+  new THREE.Vector3(0, 1.12, -0.048),
+  new THREE.Vector3(0, 1.03, -0.042),
+  new THREE.Vector3(0, 0.975, -0.055),
+])
+
 function buildBones(): THREE.BufferGeometry {
   const b = new GeometryBuilder()
   const B = BONE_COLORS
 
-  // Skull
-  b.ellipsoid([0, 1.732, -0.008], [0.072, 0.086, 0.088], B.base, 22)
-  b.ellipsoid([0, 1.67, 0.035], [0.055, 0.045, 0.055], B.base, 16)
-  b.ellipsoid([0, 1.632, 0.05], [0.04, 0.018, 0.035], B.base, 12) // mandible
+  // ---- Skull: cranium, face, orbits, nasal aperture, zygomatic arches, teeth, mandible
+  b.ellipsoid([0, 1.736, -0.012], [0.07, 0.08, 0.086], B.base, 26)
+  b.ellipsoid([0, 1.676, 0.042], [0.047, 0.03, 0.036], B.base, 18) // maxilla
   for (const side of SIDES) {
     const s = sign(side)
-    b.ellipsoid([s * 0.03, 1.72, 0.07], [0.018, 0.016, 0.01], B.joint, 10) // orbit rims
+    b.ellipsoid([s * 0.026, 1.712, 0.07], [0.018, 0.016, 0.008], B.dark, 14) // orbit
+    b.tube([[s * 0.04, 1.692, 0.062], [s * 0.062, 1.69, 0.035], [s * 0.07, 1.688, 0.0]], 0.0055, B.base, 10, 6) // zygomatic arch
+  }
+  b.ellipsoid([0, 1.684, 0.078], [0.009, 0.014, 0.005], B.dark, 10) // nasal aperture
+  b.tube([[-0.03, 1.651, 0.03], [-0.022, 1.651, 0.062], [0, 1.651, 0.074], [0.022, 1.651, 0.062], [0.03, 1.651, 0.03]], 0.0055, B.tooth, 20, 6)
+  b.tube([[-0.03, 1.638, 0.03], [-0.022, 1.638, 0.06], [0, 1.638, 0.071], [0.022, 1.638, 0.06], [0.03, 1.638, 0.03]], 0.005, B.tooth, 20, 6)
+  b.tube(
+    [
+      [-0.056, 1.684, -0.004],
+      [-0.052, 1.635, 0.006],
+      [-0.03, 1.618, 0.05],
+      [0, 1.613, 0.068],
+      [0.03, 1.618, 0.05],
+      [0.052, 1.635, 0.006],
+      [0.056, 1.684, -0.004],
+    ],
+    0.0075,
+    B.base,
+    32,
+    7,
+  ) // mandible
+
+  // ---- Spine: 7 cervical, 12 thoracic, 5 lumbar vertebrae with discs and processes
+  const vertebrae: THREE.Vector3[] = []
+  for (let i = 0; i < 24; i++) {
+    const t = i / 23
+    const c = SPINE_CURVE.getPointAt(0.02 + t * 0.9)
+    vertebrae.push(c)
+    const r = i < 7 ? 0.011 : i < 19 ? 0.014 + (i - 7) * 0.0006 : 0.021
+    b.ellipsoid([c.x, c.y, c.z], [r * 1.2, 0.0085, r], B.base, 12) // body
+    b.ellipsoid([c.x, c.y - 0.0105, c.z], [r * 1.05, 0.0022, r * 0.9], B.cartilage, 10) // disc
+    b.tube([[0, c.y, c.z - r], [0, c.y - 0.008, c.z - r - (i < 7 ? 0.012 : 0.02)]], 0.0028, B.base, 3, 5) // spinous
+    for (const s of [-1, 1]) b.tube([[s * r * 0.6, c.y, c.z - r * 0.6], [s * (r + (i >= 19 ? 0.02 : 0.012)), c.y, c.z - r * 0.9]], 0.0025, B.base, 3, 5) // transverse
+  }
+  b.along([0, 0.968, -0.068], [0, 0.895, -0.075], 0.036, 0.014, B.base, 14) // sacrum
+  b.ellipsoid([0, 0.885, -0.07], [0.008, 0.012, 0.006], B.base, 8) // coccyx
+
+  // ---- Rib cage: 12 rib pairs from the thoracic vertebrae, costal cartilage to the sternum
+  const sternumTop = 1.405
+  const sternumBottom = 1.215
+  b.along([0, sternumTop, 0.098], [0, 1.36, 0.1], 0.02, 0.006, B.base, 12) // manubrium
+  b.along([0, 1.36, 0.1], [0, sternumBottom, 0.106], 0.014, 0.005, B.base, 12) // body
+  b.ellipsoid([0, sternumBottom - 0.015, 0.103], [0.006, 0.014, 0.003], B.cartilage, 8) // xiphoid
+  for (let i = 0; i < 12; i++) {
+    const v = vertebrae[7 + i]
+    const k = (i + 1) / 13
+    const w = 0.07 + 0.085 * Math.sin(Math.PI * Math.min(0.92, k * 1.15))
+    const drop = 0.03 + i * 0.006
+    const floating = i >= 10
+    for (const s of [-1, 1]) {
+      const pts: V3[] = [
+        [s * 0.012, v.y, v.z - 0.004],
+        [s * (w * 0.55), v.y + 0.006, v.z - 0.022],
+        [s * w, v.y - drop * 0.6, v.z + 0.035],
+      ]
+      if (floating) {
+        pts.push([s * w * 0.9, v.y - drop, v.z + 0.07])
+        b.tube(pts, 0.0042, B.base, 22, 6)
+        continue
+      }
+      const front: V3 = [s * (0.05 + i * 0.004), v.y - drop * 1.25, 0.092]
+      pts.push([s * w * 0.82, v.y - drop, 0.065], front)
+      b.tube(pts, 0.0045, B.base, 28, 6)
+      // costal cartilage: true ribs to the sternum, false ribs up to the rib above
+      const sy = Math.max(sternumBottom, sternumTop - 0.012 - i * 0.026)
+      const end: V3 = i < 7 ? [s * 0.014, sy, 0.1] : [s * (0.045 + (i - 7) * 0.006), front[1] + 0.035, 0.098]
+      b.tube([front, [(front[0] + end[0]) / 2, (front[1] + end[1]) / 2 - 0.004, 0.1], end], 0.0036, B.cartilage, 8, 5)
+    }
   }
 
-  // Spine: cervical → lumbar with gentle S-curve
-  const vertebrae = 24
-  for (let i = 0; i < vertebrae; i++) {
-    const t = i / (vertebrae - 1)
-    const y = 1.6 - t * 0.66
-    const z = -0.035 - 0.022 * Math.sin(t * Math.PI * 1.2) + (t > 0.7 ? 0.02 * (t - 0.7) * 3 : 0)
-    const r = 0.012 + t * 0.01
-    b.ellipsoid([0, y, z], [r * 1.25, 0.009, r], B.base, 10)
-    b.ellipsoid([0, y, z - r - 0.008], [0.004, 0.006, 0.01], B.joint, 6) // spinous process
-  }
-  b.along([0, 0.955, -0.06], [0, 0.885, -0.05], 0.035, 0.018, B.base, 12) // sacrum
-
-  // Rib cage, sternum, clavicles, scapulae
-  for (let i = 0; i < 10; i++) {
-    const y = 1.41 - i * 0.027
-    const w = 0.12 + Math.sin(((i + 1) / 11) * Math.PI) * 0.045
-    const rib = new THREE.TorusGeometry(1, 0.055, 6, 36)
-    rib.rotateX(Math.PI / 2 + 0.32) // ribs slope downward towards the front
-    rib.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(0, y, 0.005 - i * 0.001), new THREE.Quaternion(), new THREE.Vector3(w, 0.11, 0.088 + i * 0.002)))
-    b.custom(rib, B.base)
-  }
-  b.along([0, 1.43, 0.095], [0, 1.24, 0.1], 0.016, 0.006, B.base, 10)
+  // ---- Shoulder girdle: S-shaped clavicles, flat scapulae with spine and acromion
   for (const side of SIDES) {
     const s = sign(side)
-    b.taper([s * 0.02, 1.462, 0.06], [s * 0.18, 1.468, 0.01], 0.008, 0.009, B.base, 8)
-    b.ellipsoid([s * 0.1, 1.36, -0.085], [0.06, 0.075, 0.01], B.base, 12)
+    b.tube([[s * 0.016, 1.452, 0.09], [s * 0.07, 1.462, 0.072], [s * 0.13, 1.468, 0.03], [s * 0.183, 1.462, 0.004]], 0.0058, B.base, 18, 7)
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.1, -s * 0.35, s * 0.12))
+    b.ellipsoid([s * 0.1, 1.355, -0.088], [0.047, 0.068, 0.0045], B.base, 18, q)
+    b.tube([[s * 0.058, 1.4, -0.096], [s * 0.13, 1.425, -0.085], [s * 0.188, 1.452, -0.03]], 0.0045, B.base, 12, 6) // scapular spine → acromion
+    b.ellipsoid([s * 0.178, 1.44, 0.0], [0.009, 0.016, 0.012], B.cartilage, 10) // glenoid
   }
 
-  // Pelvis
+  // ---- Pelvis: iliac wings, crests, obturator rings, pubic symphysis, acetabula
   for (const side of SIDES) {
     const s = sign(side)
-    b.ellipsoid([s * 0.095, 0.975, -0.015], [0.07, 0.065, 0.03], B.base, 16) // ilium
-    b.taper([s * 0.03, 0.865, 0.05], [s * 0.09, 0.905, 0.02], 0.012, 0.016, B.base, 8) // pubic ramus
-    b.ellipsoid([s * 0.105, 0.925, 0.01], [0.03, 0.03, 0.03], B.joint, 12) // acetabulum
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.15, -s * 0.6, s * 0.3))
+    b.ellipsoid([s * 0.098, 0.99, -0.02], [0.068, 0.06, 0.011], B.base, 20, q) // ilium
+    b.tube([[s * 0.04, 1.02, -0.07], [s * 0.1, 1.05, -0.045], [s * 0.15, 1.035, 0.0], [s * 0.15, 1.0, 0.04]], 0.006, B.base, 16, 6) // iliac crest
+    const ring = new THREE.TorusGeometry(0.026, 0.0065, 6, 22)
+    ring.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(s * 0.06, 0.885, 0.03), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -s * 0.5, 0)), new THREE.Vector3(1, 1.1, 1)))
+    b.custom(ring, B.base) // pubis + ischium around the obturator foramen
+    b.ellipsoid([s * 0.105, 0.93, 0.008], [0.026, 0.026, 0.022], B.cartilage, 14) // acetabulum
   }
+  b.ellipsoid([0, 0.888, 0.052], [0.008, 0.016, 0.006], B.cartilage, 8) // pubic symphysis
 
-  // Upper limbs
+  // ---- Upper limbs
   for (const side of SIDES) {
     const s = sign(side)
     const sh = p(`shoulder_${side}`)
     const el = p(`elbow_${side}`)
     const wr = p(`wrist_${side}`)
-    b.ellipsoid(sh, [0.024, 0.024, 0.024], B.joint, 12) // humeral head
-    b.taper(sh, el, 0.011, 0.012, B.base, 10)
-    b.ellipsoid(el, [0.024, 0.014, 0.014], B.joint, 10) // condyles
-    b.taper([el[0] - s * 0.008, el[1], 0], [wr[0] - s * 0.012, wr[1], 0], 0.008, 0.007, B.base, 8) // ulna
-    b.taper([el[0] + s * 0.008, el[1], 0], [wr[0] + s * 0.01, wr[1], 0], 0.0065, 0.0095, B.base, 8) // radius
-    b.ellipsoid([wr[0] + s * 0.004, wr[1] - 0.016, 0], [0.024, 0.014, 0.008], B.joint, 10) // carpals
+    b.ellipsoid([sh[0] - s * 0.008, sh[1], 0], [0.024, 0.025, 0.024], B.joint, 16) // humeral head
+    b.taper([sh[0] - s * 0.004, sh[1] - 0.02, 0], [el[0], el[1] + 0.02, 0], 0.0115, 0.011, B.base, 12) // humerus
+    b.ellipsoid([el[0], el[1] + 0.006, 0], [0.027, 0.013, 0.015], B.joint, 14) // epicondyles
+    b.taper([el[0] - s * 0.008, el[1] - 0.008, -0.004], [wr[0] - s * 0.013, wr[1] + 0.008, 0], 0.0085, 0.006, B.base, 10) // ulna
+    b.ellipsoid([el[0] - s * 0.008, el[1] + 0.003, -0.012], [0.009, 0.012, 0.008], B.base, 10) // olecranon
+    b.taper([el[0] + s * 0.009, el[1] - 0.01, 0.004], [wr[0] + s * 0.01, wr[1] + 0.006, 0.002], 0.0065, 0.0105, B.base, 10) // radius
+    for (let k = 0; k < 8; k++) {
+      const row = k < 4 ? 0 : 1
+      const col = k % 4
+      b.ellipsoid([wr[0] + s * (0.018 - col * 0.012), wr[1] - 0.008 - row * 0.013, 0], [0.0062, 0.0058, 0.0055], B.joint, 8) // carpals
+    }
     for (const d of FINGERS) {
       const mcp = p(`mcp${d}_${side}`)
       const pip = p(`pip${d}_${side}`)
-      const base: V3 = d === 1 ? [wr[0] + s * 0.028, wr[1] - 0.03, 0] : [wr[0] + (mcp[0] - wr[0]) * 0.45, wr[1] - 0.026, 0]
-      b.taper(base, mcp, 0.0042, 0.0045, B.base, 8) // metacarpal
+      const base: V3 = d === 1 ? [wr[0] + s * 0.03, wr[1] - 0.03, 0] : [wr[0] + (mcp[0] - wr[0]) * 0.55, wr[1] - 0.034, 0]
+      b.taper(base, mcp, 0.0042, 0.0046, B.base, 8) // metacarpal
       b.ellipsoid(mcp, [0.0058, 0.0058, 0.0058], B.cartilage, 8)
-      b.taper(mcp, pip, 0.0036, 0.0034, B.base, 8)
-      b.ellipsoid(pip, [0.005, 0.005, 0.005], B.cartilage, 8)
+      b.taper(mcp, pip, 0.0037, 0.0033, B.base, 8)
+      b.ellipsoid(pip, [0.0049, 0.0049, 0.0049], B.cartilage, 8)
       if (d === 1) {
         b.taper(pip, [pip[0], pip[1] - 0.026, 0], 0.003, 0.0026, B.base, 8)
       } else {
         const dip = p(`dip${d}_${side}`)
-        b.taper(pip, dip, 0.0031, 0.0029, B.base, 8)
-        b.ellipsoid(dip, [0.0042, 0.0042, 0.0042], B.cartilage, 8)
-        b.taper(dip, [dip[0], dip[1] - 0.02, 0], 0.0026, 0.0022, B.base, 8)
+        b.taper(pip, dip, 0.0031, 0.0028, B.base, 8)
+        b.ellipsoid(dip, [0.0041, 0.0041, 0.0041], B.cartilage, 8)
+        b.taper(dip, [dip[0], dip[1] - 0.02, 0], 0.0026, 0.0021, B.base, 8)
       }
     }
   }
 
-  // Lower limbs
+  // ---- Lower limbs
   for (const side of SIDES) {
     const s = sign(side)
-    const hip = p(`hip_${side}`, 0.01)
+    const hip: V3 = [s * 0.105, 0.93, 0.008]
     const kn = p(`knee_${side}`)
     const an = p(`ankle_${side}`)
-    b.ellipsoid(hip, [0.024, 0.024, 0.024], B.joint, 12) // femoral head
-    b.taper([hip[0] + s * 0.03, hip[1] - 0.02, 0], [hip[0] + s * 0.012, hip[1] - 0.055, 0], 0.016, 0.014, B.base, 8) // neck / trochanter
-    b.taper([hip[0] + s * 0.012, hip[1] - 0.05, 0], kn, 0.014, 0.016, B.base, 10) // femur
-    b.ellipsoid([kn[0], kn[1] + 0.012, 0], [0.036, 0.018, 0.028], B.joint, 12) // femoral condyles
-    b.ellipsoid([kn[0], kn[1] - 0.012, 0], [0.034, 0.012, 0.026], B.cartilage, 12) // tibial plateau
-    b.ellipsoid([kn[0], kn[1], 0.038], [0.02, 0.024, 0.009], B.base, 10) // patella
-    b.taper([kn[0], kn[1] - 0.02, 0], [an[0], an[1] + 0.01, 0], 0.016, 0.012, B.base, 10) // tibia
-    b.taper([kn[0] + s * 0.03, kn[1] - 0.035, -0.008], [an[0] + s * 0.03, an[1] - 0.005, -0.004], 0.006, 0.0055, B.base, 8) // fibula
-    b.ellipsoid([an[0], an[1] - 0.03, -0.01], [0.022, 0.018, 0.035], B.joint, 10) // talus / calcaneus
-    b.ellipsoid([an[0], 0.032, -0.04], [0.02, 0.025, 0.03], B.base, 10)
+    const troch: V3 = [s * 0.165, 0.905, -0.004]
+    b.ellipsoid(hip, [0.022, 0.022, 0.022], B.joint, 14) // femoral head
+    b.taper(hip, [s * 0.145, 0.895, 0], 0.012, 0.014, B.base, 10) // femoral neck
+    b.ellipsoid(troch, [0.018, 0.024, 0.017], B.base, 12) // greater trochanter
+    b.taper([s * 0.15, 0.89, 0], [kn[0], kn[1] + 0.03, 0], 0.0135, 0.0125, B.base, 12) // femoral shaft
+    b.ellipsoid([kn[0], kn[1] + 0.014, -0.004], [0.036, 0.019, 0.028], B.joint, 16) // femoral condyles
+    b.ellipsoid([kn[0], kn[1] - 0.006, 0], [0.034, 0.0045, 0.026], B.cartilage, 14) // joint space
+    b.ellipsoid([kn[0], kn[1] - 0.018, 0], [0.033, 0.011, 0.025], B.joint, 14) // tibial plateau
+    b.ellipsoid([kn[0], kn[1] + 0.006, 0.038], [0.019, 0.023, 0.008], B.base, 12) // patella
+    b.taper([kn[0], kn[1] - 0.025, 0], [an[0], an[1] + 0.012, 0], 0.0145, 0.0115, B.base, 12) // tibia
+    b.taper([kn[0] + s * 0.03, kn[1] - 0.035, -0.008], [an[0] + s * 0.031, an[1] - 0.012, -0.004], 0.0055, 0.0055, B.base, 8) // fibula
+    b.ellipsoid([an[0] - s * 0.024, an[1] - 0.008, 0], [0.009, 0.014, 0.01], B.base, 8) // medial malleolus
+    b.ellipsoid([an[0], an[1] - 0.03, -0.004], [0.019, 0.014, 0.024], B.joint, 12) // talus
+    b.ellipsoid([an[0], 0.035, -0.035], [0.018, 0.022, 0.034], B.base, 12) // calcaneus
+    b.ellipsoid([an[0] - s * 0.008, 0.05, 0.035], [0.022, 0.014, 0.018], B.joint, 10) // navicular / cuboid
     for (const d of FINGERS) {
       const mtp = p(`mtp${d}_${side}`)
       const r = d === 1 ? 0.0065 : 0.0045
-      b.taper([an[0] + (mtp[0] - an[0]) * 0.4, 0.05, 0.03], [mtp[0], 0.03, 0.138], r * 0.9, r, B.base, 8) // metatarsal
+      b.taper([an[0] + (mtp[0] - an[0]) * 0.45, 0.046, 0.05], [mtp[0], 0.03, 0.138], r * 0.9, r, B.base, 8) // metatarsal
       b.ellipsoid([mtp[0], 0.03, 0.142], [r + 0.0018, r + 0.0018, r + 0.0018], B.cartilage, 8)
-      b.taper([mtp[0], 0.028, 0.146], [mtp[0], 0.02, d === 1 ? 0.186 : 0.172], r * 0.8, r * 0.65, B.base, 8)
+      b.taper([mtp[0], 0.028, 0.146], [mtp[0], 0.02, d === 1 ? 0.186 : 0.172], r * 0.8, r * 0.65, B.base, 8) // phalanges
     }
   }
 

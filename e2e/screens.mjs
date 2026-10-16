@@ -8,8 +8,10 @@ await page.evaluate(() => localStorage.clear())
 await page.goto(BASE + '?e2e', { waitUntil: 'networkidle' })
 await page.waitForSelector('canvas')
 await page.waitForTimeout(2500)
-await page.getByRole('button', { name: 'Start' }).click()
-await page.waitForTimeout(1800)
+for (const n of ['Right wrist tender', 'Right wrist swollen', 'Left knee tender', 'Right MCP 2 (index) tender']) {
+  await page.getByRole('button', { name: n, exact: true }).click()
+}
+await page.waitForTimeout(800)
 await page.screenshot({ path: 'docs/screenshots/1-joints.png' })
 await page.getByRole('button', { name: 'Load example' }).click()
 await page.waitForTimeout(2000)

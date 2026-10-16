@@ -158,7 +158,7 @@ export default function BodyStage({ data, selectedId, onSelect, initialMode, foc
         </p>
       )}
 
-      <div className="stage-canvas" data-mode={effective}>
+      <div className="stage-canvas" data-mode={effective} data-xray={effective === '3d' && showBones}>
         {effective === '3d' ? (
           <SceneBoundary onFail={(e) => setFailure(String(e))}>
             <Suspense fallback={<div className="stage-loading">Loading 3D body…</div>}>

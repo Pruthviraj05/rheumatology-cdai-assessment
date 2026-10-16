@@ -24,102 +24,109 @@ function mount(repo: AssessmentRepository = new MemoryAssessmentRepository(), co
 }
 
 const marker = (id: string) => document.querySelector<SVGGElement>(`g.marker2d[data-joint-id="${id}"]`)!
-const stat = (name: string) => screen.getByTestId(`stat-${name}`)
+const ready = () => waitFor(() => expect(screen.getByTestId('assessment-status')).not.toHaveTextContent('Loading'))
 
-async function ready() {
-  await waitFor(() => expect(screen.getByTestId('assessment-status')).not.toHaveTextContent('Loading'))
+async function toRating(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId('to-rating'))
 }
 
-describe('2D fallback supports the full examination workflow', () => {
-  it('renders every registry joint as an operable marker across the front and back charts', async () => {
+async function seed(repo: MemoryAssessmentRepository, intent: SaveRequest['intent'] = 'draft') {
+  let d = markNormal(createEmptyAssessment(), all28)
+  for (const id of ['wrist_r', 'mcp2_r', 'mcp3_r', 'knee_l', 'wrist_l', 'pip2_l']) d = updateJoint(d, id, { tenderness: 'tender' })
+  for (const id of ['wrist_r', 'mcp2_r', 'mcp3_r', 'knee_l']) d = updateJoint(d, id, { swelling: 'swollen' })
+  d = setGlobal(setGlobal(d, 'ptga', 5), 'prga', 3)
+  await repo.save({
+    intent,
+    patientId: 'P-1',
+    consultationId: 'C-1',
+    consultationDate: '2026-10-16',
+    clinician: { id: 'dr', name: 'Dr Test' },
+    payload: toPayload(d),
+    expectedRevision: 0,
+  })
+}
+
+describe('2D chart supports the full examination workflow', () => {
+  it('renders every registry joint across the front and back charts', async () => {
     const { user } = mount()
     await ready()
     const ids = () => new Set(Array.from(document.querySelectorAll('g.marker2d')).map((g) => g.getAttribute('data-joint-id')))
     const front = ids()
-    expect(front.has('tmj_r')).toBe(true)
-    expect(front.has('lumbar_spine')).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Back' }))
     const back = ids()
     expect(back.has('lumbar_spine')).toBe(true)
-    expect(back.has('cervical_spine')).toBe(true)
     expect(new Set([...front, ...back]).size).toBe(54)
   })
 
-  it('selects joints, records independent findings and updates counts', async () => {
+  it('starts with a simple prompt and walks through the joints', async () => {
+    const { user } = mount()
+    await ready()
+    expect(screen.getByRole('heading', { name: "Let's check the joints" })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Start' }))
+    expect(screen.getByTestId('selected-joint-name')).toHaveTextContent('Right shoulder')
+    expect(screen.getByText('Joint 1 of 28')).toBeInTheDocument()
+  })
+
+  it('records tender / swollen independently and keeps extra joints out of the count', async () => {
     const { user } = mount()
     await ready()
 
     await user.click(marker('wrist_r'))
     expect(screen.getByTestId('selected-joint-name')).toHaveTextContent('Right wrist')
-    await user.click(screen.getByRole('button', { name: 'Tender' }))
-    expect(stat('tender')).toHaveTextContent('1')
-    expect(stat('swollen')).toHaveTextContent('0')
+    await user.click(screen.getByRole('button', { name: 'Yes, tender' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, swollen' }))
 
-    await user.click(screen.getByRole('button', { name: 'Swollen' }))
-    expect(stat('swollen')).toHaveTextContent('1')
-
-    // ankle is a pain-map joint: must not change TJC28 / SJC28
+    // an ankle is an "extra" joint: never counted
     await user.click(marker('ankle_l'))
-    await user.click(screen.getByRole('button', { name: 'Tender' }))
-    await user.click(screen.getByRole('button', { name: 'Swollen' }))
-    expect(stat('tender')).toHaveTextContent('1')
-    expect(stat('swollen')).toHaveTextContent('1')
+    expect(screen.getByText(/not counted in the score/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Yes, tender' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, swollen' }))
 
-    // unexamined joints are not negatives
-    expect(stat('unexamined')).toHaveTextContent('27')
-    expect(screen.getByTestId('summary-score')).toHaveTextContent('—')
+    await toRating(user)
+    expect(screen.getByText(/From the joint check/)).toHaveTextContent('1 tender · 1 swollen')
+    expect(screen.getByText(/27 joints not checked yet/)).toBeInTheDocument()
   })
 
-  it('computes the live CDAI and keeps keyboard shortcuts working', async () => {
+  it('shows no score until everything is entered, then the exact CDAI', async () => {
+    const { user } = mount()
+    await ready()
+    await user.click(screen.getByRole('button', { name: /^3\s*Result$/ }))
+    expect(screen.getByTestId('cdai-score')).toHaveTextContent('—')
+    expect(screen.getByTestId('cdai-category')).toHaveTextContent('Not finished yet')
+  })
+
+  it('keyboard shortcut toggles tenderness', async () => {
     const { user } = mount()
     await ready()
     await user.click(marker('knee_l'))
     await user.keyboard('t')
-    expect(stat('tender')).toHaveTextContent('1')
-    await user.keyboard('t') // toggles to not tender
-    expect(stat('tender')).toHaveTextContent('0')
-    await user.keyboard('p')
-    expect(within(screen.getByLabelText('Recorded findings summary')).getByText('Pain')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes, tender' })).toHaveAttribute('aria-pressed', 'true')
+    await user.keyboard('t')
+    expect(screen.getByRole('button', { name: 'Yes, tender' })).toHaveAttribute('aria-pressed', 'false')
   })
 })
 
-describe('persistence behaviour', () => {
-  async function seedComplete(repo: MemoryAssessmentRepository, intent: SaveRequest['intent'] = 'draft') {
-    let d = markNormal(createEmptyAssessment(), all28)
-    for (const id of ['wrist_r', 'mcp2_r', 'mcp3_r', 'knee_l', 'wrist_l', 'pip2_l']) d = updateJoint(d, id, { tenderness: 'tender' })
-    for (const id of ['wrist_r', 'mcp2_r', 'mcp3_r', 'knee_l']) d = updateJoint(d, id, { swelling: 'swollen' })
-    d = setGlobal(setGlobal(d, 'ptga', 5), 'prga', 3)
-    await repo.save({
-      intent,
-      patientId: 'P-1',
-      consultationId: 'C-1',
-      consultationDate: '2026-10-16',
-      clinician: { id: 'dr', name: 'Dr Test' },
-      payload: toPayload(d),
-      expectedRevision: 0,
-    })
-  }
-
+describe('saving and reopening', () => {
   it('reopens a saved assessment with the same findings and score (6+4+5+3 = 18)', async () => {
     const repo = new MemoryAssessmentRepository()
-    await seedComplete(repo)
-    mount(repo)
-    await waitFor(() => expect(screen.getByTestId('summary-score')).toHaveTextContent('18'))
-    expect(stat('tender')).toHaveTextContent('6')
-    expect(stat('swollen')).toHaveTextContent('4')
-    expect(screen.getByText('Moderate disease activity')).toBeInTheDocument()
+    await seed(repo)
+    const { user } = mount(repo)
+    await waitFor(() => expect(screen.getByTestId('assessment-status')).toHaveTextContent('Ready to finalize'))
+    await user.click(screen.getByRole('button', { name: /^3\s*Result$/ }))
+    expect(screen.getByTestId('cdai-score')).toHaveTextContent('18')
+    expect(screen.getByTestId('cdai-category')).toHaveTextContent('Moderate disease activity')
   })
 
   it('a finalized assessment is locked and offers amendment', async () => {
     const repo = new MemoryAssessmentRepository()
-    await seedComplete(repo, 'finalize')
+    await seed(repo, 'finalize')
     mount(repo)
     await waitFor(() => expect(screen.getByTestId('assessment-status')).toHaveTextContent('Finalized'))
-    expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument()
+    expect(screen.getByText(/This assessment is finalized/)).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /Amend/ }).length).toBeGreaterThan(0)
   })
 
-  it('a failed save keeps every entry on screen and reports the error', async () => {
+  it('a failed save keeps every answer on screen and says so', async () => {
     const base = new MemoryAssessmentRepository()
     const failing: AssessmentRepository = {
       getForConsultation: (p, c) => base.getForConsultation(p, c),
@@ -129,13 +136,14 @@ describe('persistence behaviour', () => {
     const { user } = mount(failing)
     await ready()
     await user.click(marker('wrist_r'))
-    await user.click(screen.getByRole('button', { name: 'Tender' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, tender' }))
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be saved/i)
-    expect(stat('tender')).toHaveTextContent('1')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/could not be saved/i)
+    expect(alert).toHaveTextContent(/still on screen/i)
+    expect(screen.getByRole('button', { name: 'Yes, tender' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByTestId('save-state')).toHaveTextContent('Unsaved changes')
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled() // can retry
   })
 
   it('prevents duplicate saves while one is in flight', async () => {
@@ -154,24 +162,25 @@ describe('persistence behaviour', () => {
     const { user } = mount(repo)
     await ready()
     await user.click(marker('wrist_r'))
-    await user.click(screen.getByRole('button', { name: 'Tender' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, tender' }))
     const btn = screen.getByRole('button', { name: 'Save draft' })
     await user.click(btn)
-    await user.click(btn) // second click while the first is pending
+    await user.click(btn)
     release()
-    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent(/Draft saved/))
+    await waitFor(() => expect(screen.getByTestId('save-state')).toHaveTextContent('Saved'))
     expect(save).toHaveBeenCalledTimes(1)
     expect((await base.listForPatient('P-1')).length).toBe(1)
   })
 })
 
 describe('permissions', () => {
-  it('view-only users cannot change findings', async () => {
+  it('view-only users cannot change answers', async () => {
     const { user } = mount(new MemoryAssessmentRepository(), ctx(false))
     await ready()
     expect(screen.getByText(/view-only access/i)).toBeInTheDocument()
     await user.click(marker('wrist_r'))
-    expect(screen.getByRole('button', { name: 'Tender' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Yes, tender' })).toBeDisabled()
+    const rating = within(document.body)
+    expect(rating.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument()
   })
 })

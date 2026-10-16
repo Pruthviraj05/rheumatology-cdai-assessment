@@ -47,6 +47,7 @@ export default function App() {
   const [nonce, setNonce] = useState(0)
   const [note, setNote] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
+  const [showTools, setShowTools] = useState(false)
 
   const visit = visits.find((v) => v.id === visitId) ?? visits[0]
 
@@ -125,37 +126,44 @@ export default function App() {
 
   return (
     <div className="host">
-      <div className="host-bar" role="region" aria-label="Demo host controls">
-        <strong>Demo host</strong>
-        <span className="muted">stands in for the clinic app · all data is fictional and stored only in this browser</span>
+      <div className="host-bar" role="region" aria-label="Demo controls">
+        <strong>Demo</strong>
+        <span className="muted">fictional data · stored only in this browser</span>
         <span className="spacer" />
-        <label>
-          Visit
-          <select value={visit.id} onChange={(e) => setVisitId(e.target.value)}>
-            {visits.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.id} · {v.date}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" onClick={newVisit}>
-          + New visit
+        <button type="button" aria-expanded={showTools} onClick={() => setShowTools((v) => !v)}>
+          Demo options {showTools ? '▴' : '▾'}
         </button>
-        <label>
-          Role
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="rheumatologist">Rheumatologist (can edit)</option>
-            <option value="viewer">Read-only viewer</option>
-          </select>
-        </label>
         <button type="button" onClick={() => void loadExample()}>
-          Load demo findings
-        </button>
-        <button type="button" onClick={reset}>
-          {confirmReset ? 'Click again to confirm' : 'Reset demo data'}
+          Load example
         </button>
       </div>
+      {showTools && (
+        <div className="host-bar" role="group" aria-label="More demo options">
+          <label>
+            Visit
+            <select value={visit.id} onChange={(e) => setVisitId(e.target.value)}>
+              {visits.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.id} · {v.date}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={newVisit}>
+            + New visit
+          </button>
+          <label>
+            Role
+            <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <option value="rheumatologist">Rheumatologist (can edit)</option>
+              <option value="viewer">Read-only viewer</option>
+            </select>
+          </label>
+          <button type="button" onClick={reset}>
+            {confirmReset ? 'Click again to confirm' : 'Reset demo data'}
+          </button>
+        </div>
+      )}
       {note && (
         <div className="host-note" role="status">
           {note}{' '}

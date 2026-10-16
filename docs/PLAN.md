@@ -53,3 +53,11 @@ Key decisions
 | E2E | Real browser: 3D clicks, camera, bulk actions, undo, live CDAI, boundaries, save/reopen, finalize, amend, history, 2D, read-only, responsive | `e2e/flow.mjs` |
 | Perf | Draw calls, frame pacing, hidden-marker picking | `e2e/perf.mjs` |
 | Oracle | Official MDCalc outputs (fixtures in `cdai.test.ts`) | manual capture, documented |
+
+## 5. Iteration 2 — simple UX, realistic 3D, optimisation
+
+* Replaced the three-panel workstation (lists, filters, tabs, legend, summary bar) with a **3-step guided flow**
+  and two big Yes/No questions per joint; camera follows the guided exam; phone/tablet stack the body above the steps.
+* New procedural anatomy (`src/scene/anatomy.ts`) with an X-ray skeleton, size-based LOD and unit tests.
+* Markers moved to InstancedMesh: 74 → 6 draw calls; ~59k triangles; standard (not physical) shading.
+* New E2E suite (44 checks) that also enters MDCalc boundary cases through the UI.

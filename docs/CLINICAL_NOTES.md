@@ -39,7 +39,7 @@ Driven live on 2026-10-16:
 5. **Completeness rule** — a CDAI is only produced when all 28 joints have *both* tenderness and swelling
    recorded (or are not assessable) and both globals are entered. Manual-count mode (as MDCalc) bypasses the joint
    examination but still requires both counts and both globals.
-6. **"Mark remaining as normal"** — bulk convenience that fills only *missing* findings as negative after an
+6. **"Everything else is normal"** — bulk convenience that fills only *missing* findings as negative after an
    explicit confirmation. Confirm it is acceptable in the clinic's documentation policy (undo is available).
 7. **Non-CDAI joints** (TMJ, spine, hips, ankles, DIP, MTP) may carry tender/swollen findings for
    documentation; they never affect TJC28/SJC28.
@@ -48,10 +48,16 @@ Driven live on 2026-10-16:
 
 ## Known limitations
 
-* The 3D body is a **procedural prototype**, not anatomically accurate. Plug in a licensed anatomical model
-  by replacing `buildBodyGeometry()` in `src/scene/Body3D.tsx`; the registry anchors (and clinical logic) are
-  independent of the mesh.
+* The 3D body (with X-ray skeleton) is a **stylised procedural model**, not a medically accurate anatomical asset.
+  A licensed model can replace `buildAnatomy()` in `src/scene/anatomy.ts`; the registry anchors and all clinical
+  logic are independent of the mesh.
 * Persistence in the demo is browser `localStorage`. A production deployment must implement
   `AssessmentRepository` against the clinic backend, re-run `applySave` server-side, enforce RBAC, and write to the
   existing audit log. No credentials or privileged logic live in this front end.
 * Only the CDAI is implemented (no SDAI/DAS28, no ESR/CRP, no PROs).
+
+## UX notes
+
+* The interface is a 3-step guided flow (Joints → Rating → Result). In the guided joint check the module moves
+  to the next joint automatically after both questions are answered; tapping a joint directly never auto-advances.
+* Keyboard shortcuts remain for power users but are not shown: `T`, `S`, `N` (normal & next), arrows, `Ctrl+Z`.

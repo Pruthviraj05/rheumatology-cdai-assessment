@@ -1,55 +1,64 @@
-# Rheumatology Assessment — 3D joint examination & CDAI
+# Joint assessment — 3D rheumatology exam & CDAI
 
-An interactive **3D joint examination and Clinical Disease Activity Index (CDAI)** module for rheumatoid
-arthritis, built to be mounted from an existing consultation screen.
+A simple, guided **joint examination and Clinical Disease Activity Index (CDAI)** module for rheumatoid
+arthritis, built to be opened from an existing consultation.
 
-**Live demo:** https://pruthviraj05.github.io/rheumatology-cdai-assessment/ &nbsp;·&nbsp; all data is fictional and stays in your browser.
+**Live demo:** https://pruthviraj05.github.io/rheumatology-cdai-assessment/ · fictional data, stored only in your browser.
+Click **Load example** to see 6 tender + 4 swollen + 5 patient + 3 doctor = **CDAI 18, moderate**.
 
-![3D examination with live CDAI](docs/screenshots/05-score.png)
+![Result step](docs/screenshots/3-result.png)
 
-## What it does
+## How it works — three simple steps
 
-* **Interactive 3D body** (rotate / zoom / pan, front-back-left-right, jump to hands, feet, spine…) with a
-  full-featured **2D chart** fallback that supports the identical workflow (also used automatically when WebGL
-  is unavailable).
-* **Three independent concepts per joint** — patient-reported pain (+ optional 0–10), clinician-assessed
-  tenderness, clinician-assessed swelling. "Not examined" is never treated as negative.
-* **Exact CDAI** — `TJC28 + SJC28 + PtGA + PrGA`, range 0–76, ≤2.8 remission / >2.8–10 low / >10–22 moderate / >22 high.
-  Verified against the official [MDCalc calculator](https://www.mdcalc.com/calc/2177/clinical-disease-activity-index-cdai-rheumatoid-arthritis).
-* **Strict 28-joint set** — shoulders, elbows, wrists, MCP 1–5, PIP 1–5 (thumb IP = PIP 1), knees. Feet, ankles,
-  hips, DIP, TMJ and spine are pain-map only and never counted.
-* **Fast examination flow** — no per-joint dialogs; keyboard shortcuts (`T` `S` `P` `N` `←` `→` `Ctrl+Z`),
-  "Normal & next", guided next-unexamined, filters, undo.
-* **Two ways to get counts** — from the joint examination, or typed manually (MDCalc-style).
-* **Global assessments** with a proper "not set" state (never defaults to 0), 0.5 steps + exact entry, validation.
-* **Save lifecycle** — draft → finalized → amended (reason required, previous version retained), history table
-  and trend, double-save protection, failed saves never lose entries, read-only role.
-* Responsive: desktop 3-panel workstation, tablet, phone.
+1. **Joints** — press *Start* and answer two questions per joint: *Is it tender?* *Is it swollen?*
+   After both answers it moves to the next joint and the 3D camera follows. You can also tap any joint on the
+   body. "Everything else is normal" fills only the joints you haven't answered (undo available).
+2. **Rating** — the patient's and the doctor's rating on a 0–10 slider ("Not rated yet" is never treated as 0).
+   Counts can also be typed directly, like on MDCalc.
+3. **Result** — the CDAI appears only when everything is entered; otherwise it tells you exactly what's missing.
+   Save a draft or finalize; finalized results can be amended with a reason (the original is kept).
 
-> The 3D body is a **procedural prototype** (clearly labelled in the UI), not anatomically accurate. This tool
-> records and calculates; it does not diagnose or recommend treatment. See
-> [docs/CLINICAL_NOTES.md](docs/CLINICAL_NOTES.md) for the decisions that need rheumatologist sign-off.
+| Desktop — guided joint check | Phone |
+|---|---|
+| ![Joints](docs/screenshots/1-joints.png) | ![Phone](docs/screenshots/phone.png) |
+
+## The calculation
+
+`CDAI = tender joints (0–28) + swollen joints (0–28) + patient rating (0–10) + doctor rating (0–10)` → 0–76.
+Remission ≤ 2.8 · Low > 2.8–10 · Moderate > 10–22 · High > 22.
+
+* Only the standard 28 joints count (shoulders, elbows, wrists, MCP 1–5, PIP 1–5 incl. thumb IP, knees).
+  Feet, ankles, hips, DIP, jaw and spine can be documented but never change the score.
+* Arithmetic is done in integer tenths, so 0.1 + 2.7 is exactly 2.8 (remission) — a classic floating-point trap.
+* Verified against the official [MDCalc calculator](https://www.mdcalc.com/calc/2177/clinical-disease-activity-index-cdai-rheumatoid-arthritis)
+  at every category boundary — in unit tests **and** by entering the cases through the real UI in the E2E suite.
+
+## 3D body
+
+* Stylised anatomical model built procedurally: lofted torso, shaped head, muscle-shaped limbs, detailed hands
+  (knuckles, three phalanges per finger, nails, thenar eminence) and feet (heel, arch, toes, ankle bones).
+* **X-ray** toggle shows a skeleton (skull, curved spine, rib cage, pelvis, long bones, carpals/metacarpals,
+  phalanges, patellae, metatarsals) aligned with the joint markers.
+* Optimised: render-on-demand, the whole body is one draw call, all 54 markers are 4 instanced draw calls
+  (**6 draw calls total**, ~59k triangles), size-based level of detail, adaptive resolution while orbiting.
+* A **Joint chart** (2D) offers the identical workflow and is used automatically when WebGL isn't available.
+* It is a stylised model for orientation, not a medically accurate anatomical asset.
 
 ## Run it
 
 ```bash
 npm install
 npm run dev          # http://localhost:5173
-npm run check        # typecheck + lint + 70+ tests
-npm run build        # production bundle in dist/
-npm run e2e          # real-browser end-to-end flow (needs the dev/preview server + local Chrome)
+npm run check        # typecheck + lint + 88 unit/component tests
+npm run build
+npm run e2e          # 44 real-browser checks (needs a running dev/preview server and local Chrome)
+npm run e2e:perf     # draw calls, frame pacing, pick-through check
+npm run deploy       # publish dist/ to GitHub Pages
 ```
-
-Try it: click **Load demo findings** in the host bar → TJC 6 + SJC 4 + PtGA 5 + PrGA 3 = **CDAI 18, moderate**.
 
 ## Integrating into the clinic application
 
-The module takes references to *existing* patient / consultation / clinician records and a persistence adapter —
-it never creates patients, consultations or users.
-
 ```tsx
-import RheumatologyAssessmentModule from './ui/RheumatologyAssessmentModule'
-
 <RheumatologyAssessmentModule
   context={{
     patient: { id: patient.id, name: patient.name },
@@ -62,28 +71,19 @@ import RheumatologyAssessmentModule from './ui/RheumatologyAssessmentModule'
 />
 ```
 
-`AssessmentRepository` (`src/persistence/repository.ts`) has three methods — `getForConsultation`,
-`listForPatient`, `save`. On the server run the same pure `applySave()` (`src/domain/records.ts`) so validation,
-finalization rules and revision history never depend on the browser, and write to the existing audit log.
+`AssessmentRepository` (`src/persistence/repository.ts`) has three methods. Run the same pure `applySave()`
+(`src/domain/records.ts`) on the server so validation, finalization and history never depend on the browser.
 
-## Project layout
+## Layout
 
 ```
-src/domain       pure clinical logic (cdai, joint registry, findings/counting, records & lifecycle)
+src/domain       pure clinical logic: CDAI engine, joint registry, findings/counting, save lifecycle
 src/persistence  repository interface + localStorage / in-memory adapters
-src/scene        react-three-fiber body, markers, camera rig (lazy-loaded chunk)
-src/ui           module shell, navigator, joint editor, score, review/history, 2D chart
+src/scene        anatomy.ts (procedural geometry) + Body3D.tsx (scene, instanced markers, camera)
+src/ui           3-step module (steps/), body stage, 2D chart, session hook
 src/host         demo host standing in for the clinic app
-e2e/             Playwright (driving local Chrome) flow / perf / picking probes
+e2e/             Playwright flows (functional, calculations, responsive, perf)
 docs/            PLAN.md, CLINICAL_NOTES.md, screenshots
 ```
 
-## 3D performance notes
-
-Render-on-demand frame loop, the whole body merged into one vertex-coloured geometry (≈74 draw calls total),
-shared marker geometry/materials, memoised markers, adaptive DPR while interacting, damped controls with
-exponential camera easing, DOM label layer (no in-canvas portals). ~48 fps even under *software* WebGL in CI.
-
-## Deploy
-
-`npm run deploy` builds and publishes `dist/` to the `gh-pages` branch (GitHub Pages, relative base path).
+See [docs/CLINICAL_NOTES.md](docs/CLINICAL_NOTES.md) for decisions that need rheumatologist sign-off.
